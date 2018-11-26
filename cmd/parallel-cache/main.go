@@ -96,8 +96,6 @@ func saveCache(cache *Cache) {
 
 func runCmd(config ProgramConfig, filename string) {
 	cacheKey := strings.Join(config.Command, " ")
-	command := config.Command
-	command = append(command, filename)
 	file, err := os.Open(filename) // #nosec G304
 	if err != nil {
 		fmt.Println(err)
@@ -120,31 +118,46 @@ func runCmd(config ProgramConfig, filename string) {
 		fmt.Println(err)
 		return
 	}
-	cmd := exec.Command(command[0], command[1:]...) // #nosec G204
-
-	cmdOut, err := cmd.Output()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	fmt.Println(fmt.Sprintf("> %s", strings.Join(command, " ")))
-	fmt.Println(string(cmdOut))
-
+	modified := fileStats.ModTime()
 	if config.Cache.Commands == nil {
 		config.Cache.Commands = map[string]*CachedFileByCommand{}
 	}
 	if config.Cache.Commands[cacheKey] == nil {
 		config.Cache.Commands[cacheKey] = &CachedFileByCommand{}
 	}
+	new := false
 	if config.Cache.Commands[cacheKey].Files == nil {
+		new = true
 		config.Cache.Commands[cacheKey].Files = map[string]*CachedFile{}
 	}
-	config.Cache.Commands[cacheKey].Files[filename] = &CachedFile{
-		Output:   string(cmdOut),
-		LastSeen: time.Now(),
-		Modified: fileStats.ModTime(),
-		Hash:     fileHash,
+
+	cacheValue := config.Cache.Commands[cacheKey].Files[filename]
+	if cacheValue.Hash == fileHash && cacheValue.Modified == modified {
+		config.State.Unchanged++
+		config.Cache.Commands[cacheKey].Files[filename].LastSeen = time.Now()
+	} else {
+		if new {
+			config.State.New++
+		} else {
+			config.State.Changed++
+		}
+		command := config.Command
+		command = append(command, filename)
+		cmd := exec.Command(command[0], command[1:]...) // #nosec G204
+		cmdOut, err := cmd.Output()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println(fmt.Sprintf("> %s", strings.Join(command, " ")))
+		fmt.Println(string(cmdOut))
+
+		config.Cache.Commands[cacheKey].Files[filename] = &CachedFile{
+			Output:   string(cmdOut),
+			LastSeen: time.Now(),
+			Modified: modified,
+			Hash:     fileHash,
+		}
 	}
 }
 
@@ -152,6 +165,7 @@ func main() {
 	config := ProgramConfig{
 		Command: os.Args[1:],
 		Cache:   loadCache(),
+		State:   &State{},
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -171,4 +185,6 @@ func main() {
 		}
 		os.Exit(1)
 	}
+	total := config.State.New + config.State.Changed + config.State.Unchanged
+	fmt.Printf("Found %d files. New: %d. Changed: %d. Unchanged: %d.\n", total, config.State.New, config.State.Changed, config.State.Unchanged)
 }
