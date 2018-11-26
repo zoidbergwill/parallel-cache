@@ -186,5 +186,8 @@ func main() {
 		os.Exit(1)
 	}
 	total := config.State.New + config.State.Changed + config.State.Unchanged
+	if config.State.Unchanged != 0 {
+		fmt.Println("Unchanged files found, use '-a' to print their cached output.")
+	}
 	fmt.Printf("Found %d files. New: %d. Changed: %d. Unchanged: %d.\n", total, config.State.New, config.State.Changed, config.State.Unchanged)
 }
