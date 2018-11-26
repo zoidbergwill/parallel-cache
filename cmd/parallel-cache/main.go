@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/md5" // #nosec G501
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -25,6 +27,7 @@ type CachedFileByCommand struct {
 type CachedFile struct {
 	Output   string    `json:"output"`
 	Modified time.Time `json:"modified"`
+	LastSeen time.Time `json:"last_seen"`
 	Hash     string    `json:"hash"`
 }
 
@@ -95,12 +98,29 @@ func runCmd(config ProgramConfig, filename string) {
 	cacheKey := strings.Join(config.Command, " ")
 	command := config.Command
 	command = append(command, filename)
+	file, err := os.Open(filename) // #nosec G304
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fileContents, err := ioutil.ReadAll(file)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	hasher := md5.New() // #nosec G401
+	_, err = hasher.Write(fileContents)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fileHash := hex.EncodeToString(hasher.Sum(nil))
 	fileStats, err := os.Stat(filename)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	cmd := exec.Command(command[0], command[1:]...)
+	cmd := exec.Command(command[0], command[1:]...) // #nosec G204
 
 	cmdOut, err := cmd.Output()
 	if err != nil {
@@ -122,8 +142,9 @@ func runCmd(config ProgramConfig, filename string) {
 	}
 	config.Cache.Commands[cacheKey].Files[filename] = &CachedFile{
 		Output:   string(cmdOut),
+		LastSeen: time.Now(),
 		Modified: fileStats.ModTime(),
-		Hash:     string(fileStats.Size()),
+		Hash:     fileHash,
 	}
 }
 
